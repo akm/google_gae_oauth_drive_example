@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"time"
 
 	// "models"
 
@@ -63,7 +64,20 @@ func (h *Handler) Index(c echo.Context) error {
 			log.Errorf(ctx, "ERROR failed to get calendar.Service because of %v\n", err)
 			return c.String(http.StatusOK, "ERROR failed to get calendar.Service")
 		}
-		list, err := s.CalendarList.List().Do()
+		st := c.QueryParam("st")
+		et := c.QueryParam("et")
+		if st == "" {
+			st = time.Now().Format(time.RFC3339)
+		}
+		if et == "" {
+			t, err := time.Parse(time.RFC3339, st)
+			if err != nil {
+				t = time.Now()
+			}
+			et = t.AddDate(0, 1, 0).Format(time.RFC3339)
+		}
+		list, err := s.Events.
+			List(c.QueryParam("calendar_id")).TimeMin(st).TimeMax(et).Do()
 		if err != nil {
 			log.Errorf(ctx, "ERROR failed to get List by calendar.Service.CalendarList because of %v\n", err)
 			return c.String(http.StatusOK, "ERROR failed to get List by calendar.Service.CalendarList")
