@@ -9,7 +9,7 @@ api_version: go1.8                      # used when appengine supports different
 handlers:
 - url: /.*
   script: _go_app
-  login: admin
+  login: required
 
 nobuild_files:
 - vendor/

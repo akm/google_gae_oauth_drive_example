@@ -18,6 +18,7 @@ import (
 	"google.golang.org/api/sheets/v4"
 	"google.golang.org/appengine"
 	"google.golang.org/appengine/log"
+	"google.golang.org/appengine/user"
 
 	"github.com/gorilla/sessions"
 	"github.com/labstack/echo"
@@ -117,6 +118,7 @@ func (h *Handler) Callback(c echo.Context) error {
 			log.Errorf(ctx, "ERROR %s\n", msg)
 			return c.Redirect(http.StatusFound, "/")
 		}
+
 		tokenJson, err := json.Marshal(token)
 		if err != nil {
 			msg := "Failed to marshal token to JSON"
@@ -126,6 +128,17 @@ func (h *Handler) Callback(c echo.Context) error {
 			return c.Redirect(http.StatusFound, "/")
 		}
 		sess.Values["credentials"] = string(tokenJson)
+		log.Infof(ctx, "tokenJson: %v\n", string(tokenJson))
+
+		u := user.Current(ctx)
+		if u == nil {
+			url, _ := user.LoginURL(ctx, "/")
+			fmt.Fprintf(w, `<a href="%s">Sign in or register</a>`, url)
+			return c.Redirect(http.StatusFound, url)
+		}
+
+		
+		
 		sess.Save(c.Request(), c.Response())
 		return c.Redirect(http.StatusFound, "/")
 	}
