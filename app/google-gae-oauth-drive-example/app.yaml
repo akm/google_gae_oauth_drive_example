@@ -7,6 +7,9 @@ api_version: go1.8                      # used when appengine supports different
 # version: alpha                  # you can run multiple versions of an app and A/B test
 
 handlers:
+- url: /fulfillments
+  script: _go_app
+
 - url: /.*
   script: _go_app
   login: required
