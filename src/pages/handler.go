@@ -17,6 +17,7 @@ import (
 	"google.golang.org/api/drive/v3"
 	"google.golang.org/api/sheets/v4"
 	"google.golang.org/appengine"
+	"google.golang.org/appengine/datastore"
 	"google.golang.org/appengine/log"
 	"google.golang.org/appengine/user"
 
@@ -133,12 +134,17 @@ func (h *Handler) Callback(c echo.Context) error {
 		u := user.Current(ctx)
 		if u == nil {
 			url, _ := user.LoginURL(ctx, "/")
-			fmt.Fprintf(w, `<a href="%s">Sign in or register</a>`, url)
+			// fmt.Fprintf(w, `<a href="%s">Sign in or register</a>`, url)
 			return c.Redirect(http.StatusFound, url)
 		}
 
-		
-		
+		key := datastore.NewKey(ctx, "UserTokens", u.Email, 0, nil)
+		_, err = datastore.Put(ctx, key, token)
+		if err != nil {
+			log.Errorf(ctx, "ERROR %v\n", err)
+			return c.Redirect(http.StatusFound, "/")
+		}
+
 		sess.Save(c.Request(), c.Response())
 		return c.Redirect(http.StatusFound, "/")
 	}
