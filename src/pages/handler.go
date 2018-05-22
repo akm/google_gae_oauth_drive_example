@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	// "models"
@@ -60,6 +61,9 @@ func (h *Handler) Index(c echo.Context) error {
 			return c.String(http.StatusOK, "ERROR failed to parse token JSON")
 		}
 		conf := h.OAuth2Config(ctx, req.URL.Scheme+"://"+req.URL.Host)
+		log.Infof(ctx, "conf URL: %q\n", req.URL.Scheme+"://"+req.URL.Host)
+		log.Infof(ctx, "conf: %v\n", conf)
+
 		client := conf.Client(ctx, &token)
 		s, err := calendar.New(client)
 		if err != nil {
@@ -78,8 +82,10 @@ func (h *Handler) Index(c echo.Context) error {
 			}
 			et = t.AddDate(0, 1, 0).Format(time.RFC3339)
 		}
-		list, err := s.Events.
-			List(c.QueryParam("calendar_id")).TimeMin(st).TimeMax(et).Do()
+		calendarId := c.QueryParam("calendar_id")
+		log.Infof(ctx, "Get events of %s from %s ti %s\n", calendarId, st, et)
+
+		list, err := s.Events.List(calendarId).TimeMin(st).TimeMax(et).Do()
 		if err != nil {
 			log.Errorf(ctx, "ERROR failed to get List by calendar.Service.CalendarList because of %v\n", err)
 			return c.String(http.StatusOK, "ERROR failed to get List by calendar.Service.CalendarList")
@@ -99,7 +105,10 @@ func (h *Handler) Callback(c echo.Context) error {
 	req := c.Request()
 	code := c.QueryParam("code")
 	ctx := appengine.NewContext(req)
+
 	conf := h.OAuth2Config(ctx, req.URL.Scheme+"://"+req.URL.Host)
+	log.Infof(ctx, "conf URL: %q\n", req.URL.Scheme+"://"+req.URL.Host)
+	log.Infof(ctx, "conf: %v\n", conf)
 	if code == "" {
 		url := conf.AuthCodeURL("state", oauth2.AccessTypeOnline)
 		return c.Redirect(http.StatusFound, url)
@@ -119,6 +128,9 @@ func (h *Handler) Callback(c echo.Context) error {
 			log.Errorf(ctx, "ERROR %s\n", msg)
 			return c.Redirect(http.StatusFound, "/")
 		}
+
+		log.Infof(ctx, "token: %v\n", token)
+		log.Infof(ctx, "token.RefreshToken: %q\n", token.RefreshToken)
 
 		tokenJson, err := json.Marshal(token)
 		if err != nil {
@@ -166,4 +178,127 @@ func (h *Handler) OAuth2Config(ctx context.Context, baseUrl string) *oauth2.Conf
 		Endpoint:    google.Endpoint,
 		RedirectURL: baseUrl + "/oauth2callback",
 	}
+}
+
+// https://dialogflow.com/docs/fulfillment
+type FulfillmentRequest struct {
+	ResponseId  string                 `json:"responseId"`  // Unique id for request.
+	Session     string                 `json:"session"`     // Unique session id.
+	QueryResult FulfillmentQueryResult `json:"queryResult"` // Result of the conversation query or event processing.
+	// OriginalDetectIntentRequest Object `json:"originalDetectIntentRequest"` // Full request coming from an integrated platform. (Facebook Messenger, Slack, etc.)
+}
+
+type FulfillmentQueryResult struct {
+	QueryText                string            `json:"queryText"`                //The original text of the query.
+	Parameters               map[string]string `json:"parameters"`               // Consists of parameter_name:parameter_value pairs.
+	AllRequiredParamsPresent bool              `json:"allRequiredParamsPresent"` // Set to false if required parameters are missing in query.
+	// FulfillmentText           String            `json:"fulfillmentText"` // Text to be pronounced to the user or shown on the screen.
+	// FulfillmentMessages       Object            `json:"fulfillmentMessages"` // Collection of rich messages to show the user.
+	// OutputContexts            Object            `json:"outputContexts"` // Collection of output contexts.
+	// Intent                    Object            `json:"intent"` // The intent that matched the user's query.
+	IntentDetectionConfidence float64 `json:"intentDetectionConfidence"` // 0-1	Matching score for the intent.
+	// DiagnosticInfo         Object  `json:"diagnosticInfo"` // Free-form diagnostic info.
+	LanguageCode string `json:"languageCode"` // The language that was triggered during intent matching.
+}
+
+type UserName struct {
+	Email string
+}
+
+func (h *Handler) Fulfillments(c echo.Context) error {
+	req := c.Request()
+	ctx := appengine.NewContext(req)
+
+	log.Infof(ctx, "Fulfillments called\n")
+
+	var fReq FulfillmentRequest
+	err := c.Bind(&fReq)
+	if err != nil {
+		log.Errorf(ctx, "Error bind cause of %v\n", err)
+		return c.JSON(http.StatusOK, map[string]string{"fulfillmentText": "Bindに失敗しました"})
+	}
+
+	params := fReq.QueryResult.Parameters
+	personName := params["person-name"]
+	if personName == "" {
+		return c.JSON(http.StatusOK, map[string]string{"fulfillmentText": fmt.Sprintf("person-nameが見つかりませんでした in %v", params)})
+	}
+
+	var userName UserName
+	nameKey := datastore.NewKey(ctx, "UserNames", personName, 0, nil)
+	err = datastore.Get(ctx, nameKey, &userName)
+	if err != nil {
+		log.Errorf(ctx, "Error failed to get name for %v cause of %v\n", personName, err)
+		return c.JSON(http.StatusOK, map[string]string{"fulfillmentText": fmt.Sprintf("person-name %s のメールアドレスが見つかりませんでした", personName)})
+	}
+	email := userName.Email
+
+	var token oauth2.Token
+	key := datastore.NewKey(ctx, "UserTokens", email, 0, nil)
+	err = datastore.Get(ctx, key, &token)
+
+	if err != nil {
+		log.Errorf(ctx, "Error bind cause of %v\n", err)
+		return c.JSON(http.StatusOK, map[string]string{"fulfillmentText": fmt.Sprintf("person-name %s のトークンが見つかりませんでした", personName)})
+	}
+
+	conf := h.OAuth2Config(ctx, req.URL.Scheme+"://"+req.URL.Host)
+	log.Infof(ctx, "conf URL: %q\n", req.URL.Scheme+"://"+req.URL.Host)
+	log.Infof(ctx, "conf: %v\n", conf)
+	client := conf.Client(ctx, &token)
+
+	// // !!! IMPORTANT !!!
+	// // You must add your App Engine default service account to your calendar
+
+	// // https://github.com/google/google-api-go-client#application-default-credentials-example
+	// client, err := google.DefaultClient(ctx, calendar.CalendarScope)
+	// if err != nil {
+	// 	log.Errorf(ctx, "Failed to create DefaultClient\n")
+	// 	return err
+	// }
+
+	s, err := calendar.New(client)
+	if err != nil {
+		log.Errorf(ctx, "ERROR failed to get calendar.Service because of %v\n", err)
+		return c.JSON(http.StatusOK, map[string]string{"fulfillmentText": "カレンダーサービスの取得に失敗しました"})
+	}
+	dt, err := time.Parse(time.RFC3339, params["date"])
+	if err != nil {
+		dt = time.Now()
+	}
+	d := dt.Format("2006-01-02")
+	st := d + "T00:00:00+09:00"
+	et := d + "T23:59:59+09:00"
+	log.Infof(ctx, "Getting events of %s from %s ti %s\n", email, st, et)
+
+	list, err := s.Events.List(email).TimeMin(st).TimeMax(et).Do()
+	if err != nil {
+		log.Errorf(ctx, "ERROR failed to get List by calendar.Service.Events.List because of %v\n", err)
+		return c.JSON(http.StatusOK, map[string]string{"fulfillmentText": "カレンダーからイベントの取得に失敗しました"})
+	}
+
+	lines := []string{}
+	for _, event := range list.Items {
+		var st, et string
+		if event.Start != nil {
+			st = FromRFC3339ToBiz(event.Start.DateTime)
+		}
+		if event.End != nil {
+			et = FromRFC3339ToBiz(event.End.DateTime)
+		}
+		lines = append(lines, fmt.Sprintf("%s から %s %s", st, et, event.Summary))
+	}
+
+	return c.JSON(http.StatusOK, map[string]string{"fulfillmentText": strings.Join(lines, "\n")})
+}
+
+// https://golang.org/pkg/time/#pkg-constants
+const BizTimeFormat = "15:04"
+
+func FromRFC3339ToBiz(src string) string {
+	t, err := time.Parse(time.RFC3339, src)
+	if err != nil {
+		return src
+	}
+	return t.Format(BizTimeFormat)
 }
