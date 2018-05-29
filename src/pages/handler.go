@@ -189,9 +189,9 @@ type FulfillmentRequest struct {
 }
 
 type FulfillmentQueryResult struct {
-	QueryText                string            `json:"queryText"`                //The original text of the query.
-	Parameters               map[string]string `json:"parameters"`               // Consists of parameter_name:parameter_value pairs.
-	AllRequiredParamsPresent bool              `json:"allRequiredParamsPresent"` // Set to false if required parameters are missing in query.
+	QueryText                string                 `json:"queryText"`                //The original text of the query.
+	Parameters               map[string]interface{} `json:"parameters"`               // Consists of parameter_name:parameter_value pairs.
+	AllRequiredParamsPresent bool                   `json:"allRequiredParamsPresent"` // Set to false if required parameters are missing in query.
 	// FulfillmentText           String            `json:"fulfillmentText"` // Text to be pronounced to the user or shown on the screen.
 	// FulfillmentMessages       Object            `json:"fulfillmentMessages"` // Collection of rich messages to show the user.
 	// OutputContexts            Object            `json:"outputContexts"` // Collection of output contexts.
@@ -219,7 +219,10 @@ func (h *Handler) Fulfillments(c echo.Context) error {
 	}
 
 	params := fReq.QueryResult.Parameters
-	personName := params["person-name"]
+	personName, ok := params["person-name"].(string)
+	if !ok {
+		return c.JSON(http.StatusOK, map[string]string{"fulfillmentText": fmt.Sprintf("[エラー] person-nameが文字列ではありませんでした in %v", params)})
+	}
 	if personName == "" {
 		return c.JSON(http.StatusOK, map[string]string{"fulfillmentText": fmt.Sprintf("person-nameが見つかりませんでした in %v", params)})
 	}
@@ -262,7 +265,11 @@ func (h *Handler) Fulfillments(c echo.Context) error {
 		log.Errorf(ctx, "ERROR failed to get calendar.Service because of %v\n", err)
 		return c.JSON(http.StatusOK, map[string]string{"fulfillmentText": "カレンダーサービスの取得に失敗しました"})
 	}
-	dt, err := time.Parse(time.RFC3339, params["date"])
+	dateStr, ok := params["date"].(string)
+	if !ok {
+		return c.JSON(http.StatusOK, map[string]string{"fulfillmentText": fmt.Sprintf("[エラー] dateが文字列ではありませんでした in %v", params)})
+	}
+	dt, err := time.Parse(time.RFC3339, dateStr)
 	if err != nil {
 		dt = time.Now()
 	}
