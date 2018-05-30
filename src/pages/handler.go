@@ -110,7 +110,10 @@ func (h *Handler) Callback(c echo.Context) error {
 	log.Infof(ctx, "conf URL: %q\n", req.URL.Scheme+"://"+req.URL.Host)
 	log.Infof(ctx, "conf: %v\n", conf)
 	if code == "" {
-		url := conf.AuthCodeURL("state", oauth2.AccessTypeOnline)
+		// Set ApprovalForce to get refresh-token
+		// https://godoc.org/golang.org/x/oauth2#AuthCodeOption
+		// https://stackoverflow.com/questions/10827920/not-receiving-google-oauth-refresh-token
+		url := conf.AuthCodeURL("state", oauth2.AccessTypeOffline, oauth2.ApprovalForce)
 		return c.Redirect(http.StatusFound, url)
 	} else {
 		sess, _ := session.Get("session", c)
